@@ -93,6 +93,9 @@ type
     function UserAuthKey(const UserName: string; PrivateKeyFile: string; PassPhrase: string): Boolean; overload;
     function UserAuthAgent(const UserName: string): Boolean;
     function GetUserName: string;
+    // Set timeout for blocking functions
+    // - aTimeoutInMs: Timeout in milliseconds.
+    procedure SetTimeout(aTimeoutInMs: LongInt);
     property Addr: PLIBSSH2_SESSION read GetAddr;
     property SessionState: TSessionState read GetSessionState;
     property Blocking: Boolean read GetBlocking write SetBlocking;
@@ -139,8 +142,13 @@ function CreateScp(Session: ISshSession): IScp;
 function CreateSshExec(Session: ISshSession): ISshExec;
 
 // support routines
-function AnsiToUnicode(P: PAnsiChar; CP: Word): string;
+function AnsiToUnicode(P: PAnsiChar; CP: Word): string; overload;
+function AnsiToUnicode(P: PAnsiChar; Len: Int64; CP: Word): string; overload;
 procedure CheckLibSsh2Result(ResultCode: Integer; Session: ISshSession; const Op: string);
+
+var
+  // Default timeout in milliseconds for block functions
+  gDefaultSshTimeout: Integer = 30000;
 
 implementation
 
@@ -171,6 +179,17 @@ begin
   Result := string(S);
 end;
 
+function AnsiToUnicode(P: PAnsiChar; Len: Int64; CP: Word): string;
+Var
+  S: RawByteString;
+begin
+  if P = nil then Exit('');
+
+  SetString(S, P, Len);
+  SetCodePage(S, CP, False);
+  Result := string(S);
+end;
+
 procedure CheckLibSsh2Result(ResultCode: Integer; Session: ISshSession; const Op: string);
 var
   I: Integer;
@@ -184,7 +203,7 @@ begin
       // LIBSSH2_ERROR_EAGAIN indicates no result in non-blocking mode
       if ResultCode = LIBSSH2_ERROR_EAGAIN then Exit;
       libssh2_session_last_error(Session.Addr, P, I, 0);
-      ErrMsg := AnsiToUnicode(P, Session.CodePage);
+      ErrMsg := AnsiToUnicode(P, I, Session.CodePage);
     end;
     raise ESshError.CreateResFmt(@Err_LibSsh2,
       [ErrMsg, ResultCode, Op])
@@ -276,6 +295,9 @@ type
     function UserAuthAgent(const UserName: string): Boolean;
     function GetUserName: string;
     procedure Disconnect;
+    // Set timeout for blocking functions
+    // - aTimeoutInMs: Timeout in milliseconds.
+    procedure SetTimeout(aTimeoutInMs: LongInt);
   public
     constructor Create(Host: string; Port: Word);
     destructor Destroy; override;
@@ -437,6 +459,7 @@ begin
     Self as TSshSession, 'libssh2_session_handshake');
   SetBlocking(True);  // blocking by default
   FState := session_Connected;
+  SetTimeout(gDefaultSshTimeout);
 
   if FKnownHostCheckSettings.EnableCheck then
     try
@@ -800,6 +823,12 @@ begin
     FUserName := UserName;
   end;
 end;
+
+procedure TSshSession.SetTimeout(aTimeoutInMs: LongInt);
+begin
+  libssh2_session_set_timeout(Faddr, aTimeoutInMs);
+end;
+
 {$endregion}
 
 {$region 'TScp'}
@@ -1006,20 +1035,13 @@ begin
         MemoryStream.Write(Buf^, BytesRead);
     Until (BytesRead = 0) or Cancelled^;
 
-    // Keep whatever output there is by null-terminating the stream
-    if Cancelled^ then
-    begin
-      Buf^ := #0;
-      MemoryStream.Write(Buf^, 1);
-    end;
-
     if MemoryStream.Size > 0 then
-      Result := AnsiToUnicode(PAnsiChar(MemoryStream.Memory), Session.CodePage);
+      Result := AnsiToUnicode(PAnsiChar(MemoryStream.Memory),
+        MemoryStream.Size, Session.CodePage);
   finally
     MemoryStream.Free;
   end;
 end;
-
 
 procedure TSshExec.Exec(const Command: string; var Output, ErrOutput: string;
   var ExitCode: Integer);
