@@ -1,7 +1,7 @@
 ﻿program LocalForward;
 {
   Run and while the project is running open a browser at http://localhost:12345/
-  You should see http://git.php.net/
+  You should see http://detectportal.firefox.com/success.txt
 }
 
 {$APPTYPE CONSOLE}
@@ -28,7 +28,12 @@ begin
 end;
 
 procedure Main;
-Var
+const
+  SshPort = 22;
+  RemoteHost = 'detectportal.firefox.com';
+  LocalPort = 12345;
+  RemotePort = 80;
+var
   Host: string;
   UserName: string;
   Session: ISshSession;
@@ -43,7 +48,7 @@ begin
   Host := ParamStr(1);
   UserName := ParamStr(2);
 
-  Session := CreateSession(Host, 22);
+  Session := CreateSession(Host, SshPort);
   //Session.UseCompression := True;
   Session.SetKeybInteractiveCallback(KeybIntCallback);
 
@@ -61,10 +66,15 @@ begin
   Thread := TThread.CreateAnonymousThread(
     procedure
     begin
-        SshTunnel.ForwardLocalPort(12345, 'git.php.net', 80);
+      SshTunnel.ForwardLocalPort(LocalPort, RemoteHost, RemotePort);
     end);
   Thread.FreeOnTerminate := False;
   Thread.Start;
+  WriteLn;
+  WriteLn('Tunnel from localhost:', LocalPort, ' to ', RemoteHost, ':',
+    RemotePort, ' established');
+  WriteLn;
+  WriteLn('Press Enter to terminate');
   ReadLn;
   SshTunnel.Cancel;
   if not Thread.Finished then
@@ -72,7 +82,7 @@ begin
     Thread.WaitFor;
     Thread.Free;
   end;
-  Writeln('All done!');
+  WriteLn('All done!');
 end;
 
 begin
@@ -81,7 +91,7 @@ begin
     Main;
   except
     on E: Exception do
-      Writeln(E.ClassName, ': ', E.Message);
+      WriteLn(E.ClassName, ': ', E.Message);
   end;
   ReadLn;
 end.
