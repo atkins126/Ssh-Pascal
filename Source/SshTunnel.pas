@@ -102,11 +102,13 @@ var
   ReadFds: TFdSet;
   TimeVal: TTimeVal;
   ReturnCode: integer;
+  ThreadId: Integer;
 begin
   FCancelled := False;
   TimeVal.tv_sec := CheckInterval;  // check for cancel every one second
   TimeVal.tv_usec := 0;
   SocketOption := 1; // Initialize SocketOption
+  ThreadId := 0;
 
   ListenSock := GetWinSock.CreateSocketAndListen('localhost', LocalPort);
   setsockopt(ListenSock, SOL_SOCKET, SO_REUSEADDR, @SocketOption, sizeof(SocketOption));
@@ -124,21 +126,31 @@ begin
 
       ForwardSock := accept(listensock, nil, nil);
       if ForwardSock = INVALID_SOCKET then
-        CheckSocketResult(WSAGetLastError, 'accept');
+      begin
+        try
+          CheckSocketResult(WSAGetLastError, 'accept');
+        except on E: Exception do
+          OutputDebugString(PChar(E.Message));
+        end;
+        Continue;
+      end;
 
       TThread.CreateAnonymousThread(procedure
       begin
         try
+          Inc(ThreadId);
+          TThread.NameThreadForDebugging('Connection ' + ThreadId.ToString);
           ServeTunnelConnection(LocalPort, RemoteHost, RemotePort,
             ForwardSock, TimeVal);
         except on E: Exception do
           OutputDebugString(PChar(E.Message));
         end
       end).Start;
+      TThread.Yield;
     until FCancelled;
 
     // Wait for the threads to finish
-    TThread.Sleep(2 * CheckInterval * 1000);
+    TThread.Yield;
   finally
     if ListenSock <> INVALID_SOCKET then closesocket(ListenSock);
   end;
@@ -159,26 +171,27 @@ var
   M: TMarshaller;
 begin
   ChannelSock := FSession.Socket;
+  Channel := nil;
 
-  FSessionLock.Enter;
   try
-    FSession.Blocking := True;
-    Channel := libssh2_channel_direct_tcpip_ex(FSession.Addr,
-      M.AsAnsi(RemoteHost, FSession.CodePage).ToPointer,
-      RemotePort, '127.0.0.1', LocalPort);
-    if Channel = nil then
-      CheckLibSsh2Result(libssh2_session_last_errno(FSession.Addr),
-        FSession, 'libssh2_channel_direct_tcpip_ex');
-  finally
-    // Must use non-blocking IO hereafter due to the current libssh2 API
-    FSession.Blocking := False;
-    FSessionLock.Leave;
-  end;
+    FSessionLock.Enter;
+    try
+      FSession.Blocking := True;
+      Channel := libssh2_channel_direct_tcpip_ex(FSession.Addr,
+        M.AsAnsi(RemoteHost, FSession.CodePage).ToPointer,
+        RemotePort, '127.0.0.1', LocalPort);
+      if Channel = nil then
+        CheckLibSsh2Result(libssh2_session_last_errno(FSession.Addr),
+          FSession, 'libssh2_channel_direct_tcpip_ex');
+    finally
+      // Must use non-blocking IO hereafter due to the current libssh2 API
+      FSession.Blocking := False;
+      FSessionLock.Leave;
+    end;
 
-  // Now transfer data
-  // ForwardSocket -> Channel
-  // Channel -> ForwardSocket
-  try
+    // Now transfer data
+    // ForwardSocket -> Channel
+    // Channel -> ForwardSocket
     SetLength(Buf, FBufferSize);
     while not FCancelled do
     begin
@@ -219,7 +232,7 @@ begin
         FSessionLock.Enter;
         try
           Read := libssh2_channel_read(channel, PAnsiChar(Buf), FBufferSize);
-          if Read = LIBSSH2_ERROR_EAGAIN then
+          if (Read = 0) or (Read = LIBSSH2_ERROR_EAGAIN) then
             // Handle EAGAIN: Go to Wait state
             Continue;
           CheckLibSsh2Result(Read, FSession, 'libssh2_channel_read');
