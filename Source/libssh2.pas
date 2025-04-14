@@ -480,6 +480,10 @@ function libssh2_session_flag(session: PLIBSSH2_SESSION;
 
 {+// Userauth API*/ }
 
+
+function libssh2_userauth_banner(session: PLIBSSH2_SESSION;
+                                 var banner: PAnsiChar): Integer; cdecl;
+
 function libssh2_userauth_list(session: PLIBSSH2_SESSION;
                                const username: PAnsiChar;
                                username_len: UINT): PAnsiChar; cdecl;
@@ -1172,6 +1176,12 @@ const
   LIBSSH2_TRACE_ERROR = (1 shl 7);
   LIBSSH2_TRACE_PUBLICKEY = (1 shl 8);
   LIBSSH2_TRACE_SOCKET = (1 shl 9);
+  LIBSSH2_TRACE_ALL =
+    LIBSSH2_TRACE_TRANS or LIBSSH2_TRACE_KEX or
+    LIBSSH2_TRACE_AUTH or LIBSSH2_TRACE_CONN or
+    LIBSSH2_TRACE_SCP or LIBSSH2_TRACE_SFTP or
+    LIBSSH2_TRACE_ERROR or LIBSSH2_TRACE_PUBLICKEY or
+    LIBSSH2_TRACE_SOCKET;
 
 type
   LIBSSH2_TRACE_HANDLER_FUNC = procedure(session: PLIBSSH2_SESSION;
@@ -1206,6 +1216,7 @@ function libssh2_session_last_error; external libssh2_name delayed;
 function libssh2_session_last_errno; external libssh2_name delayed;
 function libssh2_session_block_directions; external libssh2_name delayed;
 function libssh2_session_flag; external libssh2_name delayed;
+function libssh2_userauth_banner; external libssh2_name delayed;
 function libssh2_userauth_list; external libssh2_name delayed;
 function libssh2_userauth_authenticated; external libssh2_name delayed;
 function libssh2_userauth_password_ex; external libssh2_name delayed;
